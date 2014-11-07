@@ -668,6 +668,7 @@ module Yast
     # @param [String] file name in directory defined in MODULES_DIR
     def register_modules_agent(file_name)
       full_path = File.join(MODULES_DIR, file_name)
+      log.info "Registering SCR agent to read #{full_path}"
 
       SCR::RegisterAgent(
         MODULES_SCR,
@@ -706,6 +707,7 @@ module Yast
 
       if FileUtils.Exists(MODULES_DIR)
         config_files = SCR::Read(path(".target.dir"), MODULES_DIR)
+        log.info "Files in #{MODULES_DIR}: #{config_files}"
       else
         log.error "Cannot read modules to load on boot, directory #{MODULES_DIR} does not exist"
       end
@@ -723,7 +725,10 @@ module Yast
           next
         end
 
+        file_path = File.join(MODULES_DIR, file_name)
+        log.info "File #{file_path} exists? #{FileUtils.Exists(file_path)}"
         @modules_to_load[file_name] = SCR::Read(MODULES_SCR)
+        log.info "Modules in file #{file_name}: #{@modules_to_load[file_name]}"
         SCR.UnregisterAgent(MODULES_SCR)
       end
 

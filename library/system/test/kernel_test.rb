@@ -12,34 +12,71 @@ include Yast::Logger
 Yast.import "Kernel"
 Yast.import "FileUtils"
 Yast.import "SCR"
+Yast.import "WFM"
 
-DEFAULT_DATA_DIR = File.join(File.expand_path(File.dirname(__FILE__)), "data/modules.d")
+DEFAULT_DATA_DIR_1 = "/1/etc/modules.d/"
+DEFAULT_DATA_DIR_2 = "/2/etc/modules.d/"
+DEFAULT_DATA_DIR_3 = "/3/etc/modules.d/"
+
+SCR_DATA = File.join(File.expand_path(File.dirname(__FILE__)), "data/kernel-modules/")
+
+#DEFAULT_DATA_DIR_1 = File.join(SCR_DATA, "/1/etc/modules.d/")
+#DEFAULT_DATA_DIR_2 = File.join(SCR_DATA, "/2/etc/modules.d/")
+#DEFAULT_DATA_DIR_3 = File.join(SCR_DATA, "/3/etc/modules.d/")
 
 describe "Kernel" do
   before (:each) do
     log.info "--- test ---"
-    stub_const("Yast::KernelClass::MODULES_DIR", DEFAULT_DATA_DIR)
-    @default_modules = {
-      Yast::KernelClass::MODULES_CONF_FILE => [],
-      "MODULES_LOADED_ON_BOOT.conf"=>["module-a", "module-b"],
-      "user-added-1.conf" => ["user-module-1", "user-module-2", "user-module-3"],
-      "user-added-2.conf"=>["user-module-4"],
-    }
+    stub_const("Yast::KernelClass::MODULES_DIR", DEFAULT_DATA_DIR_1)
     Yast::Kernel.reset_modules_to_load
     allow(Yast::FileUtils).to receive(:Exists).and_return(true)
+    @scr_handler = Yast::WFM.SCROpen("chroot=#{SCR_DATA}:scr", false)
+    Yast::WFM.SCRSetDefault(@scr_handler)
+  end
+
+  after (:each) do
+    Yast::WFM.SCRSetDefault(0)
+    Yast::WFM.SCRClose(@scr_handler)
   end
 
   describe "#modules_to_load" do
     describe "when modules.d directory exists" do
       it "returns hash of modules to load" do
-        expect(Yast::Kernel.modules_to_load).to eq(@default_modules)
+        stub_const("Yast::KernelClass::MODULES_DIR", DEFAULT_DATA_DIR_1)
+        modules_to_load = {
+          Yast::KernelClass::MODULES_CONF_FILE => [],
+          "MODULES_LOADED_ON_BOOT.conf"=>["module-a", "module-b"],
+          "user-added-1.conf" => ["user-module-1", "user-module-2", "user-module-3"],
+          "user-added-2.conf"=>["user-module-4"],
+        }
+        expect(Yast::Kernel.modules_to_load).to eq(modules_to_load)
       end
     end
 
     describe "when modules.d directory is missing" do
       it "returns empty list of modules for modules.d directory" do
         expect(Yast::FileUtils).to receive(:Exists).with(Yast::KernelClass::MODULES_DIR).and_return(false)
-        expect(Yast::Kernel.modules_to_load).to eq({Yast::KernelClass::MODULES_CONF_FILE => []})
+        modules_to_load = {Yast::KernelClass::MODULES_CONF_FILE => []}
+        expect(Yast::Kernel.modules_to_load).to eq(modules_to_load)
+      end
+    end
+
+    describe "when modules.d directory contains only MODULES_LOADED_ON_BOOT.conf" do
+      it "returns hash of modules to load" do
+        stub_const("Yast::KernelClass::MODULES_DIR", DEFAULT_DATA_DIR_2)
+        modules_to_load = {
+          Yast::KernelClass::MODULES_CONF_FILE => [],
+          "MODULES_LOADED_ON_BOOT.conf"=>["pciehp"]
+        }
+        expect(Yast::Kernel.modules_to_load).to eq(modules_to_load)
+      end
+    end
+
+    describe "when modules.d directory is empty" do
+      it "returns hash of modules to load" do
+        stub_const("Yast::KernelClass::MODULES_DIR", DEFAULT_DATA_DIR_3)
+        modules_to_load = {Yast::KernelClass::MODULES_CONF_FILE => []}
+        expect(Yast::Kernel.modules_to_load).to eq(modules_to_load)
       end
     end
   end
@@ -103,7 +140,7 @@ describe "Kernel" do
     describe "when modules.d directory exists" do
       it "stores all modules to be loaded to configuration files and returns true" do
         Dir.mktmpdir do |tmpdir|
-          FileUtils.cp_r(DEFAULT_DATA_DIR + "/.", tmpdir)
+          FileUtils.cp_r(DEFAULT_DATA_DIR_1 + "/.", tmpdir)
 
           stub_const("Yast::KernelClass::MODULES_DIR", tmpdir)
           Yast::Kernel.reset_modules_to_load
