@@ -33,6 +33,8 @@ require "yast"
 
 module Yast
   class SuSEFirewallProposalClass < Module
+    include Yast::Logger
+
     def main
       textdomain "base"
 
@@ -63,8 +65,10 @@ module Yast
 
       @ssh_service = "service:sshd"
 
-      @iscsi_target_service = "service:iscsitarget"
+      # bsc#916376 iSCSI Target Daemon
+      @iscsi_target_service = "service:target"
 
+      # bsc#916376 Fallback ports used when iSCSI service file is not installed
       @iscsi_target_fallback_ports = ["iscsi-target"]
     end
 
@@ -232,17 +236,16 @@ module Yast
     # @param list <string> fallback TCP ports
     # @param [Array<String>] zones
     def EnableFallbackPorts(fallback_ports, zones)
-      fallback_ports = deep_copy(fallback_ports)
-      zones = deep_copy(zones)
-      Builtins.y2warning(
-        "Enabling fallback ports: %1 in zones: %2",
-        fallback_ports,
-        zones
-      )
+      known_zones = SuSEFirewall.GetKnownFirewallZones()
+      unknown_zones = zones.reject{|zone| known_zones.include?(zone)}
+      raise "Unknown firewall zones #{unknown_zones}" unless unknown_zones.empty?
 
-      Builtins.foreach(zones) { |one_zone| Builtins.foreach(fallback_ports) do |one_port|
-        SuSEFirewall.AddService(one_port, "TCP", one_zone)
-      end }
+      log.info "Enabling fallback ports: #{fallback_ports} in zones: #{zones}"
+      zones.each do |one_zone|
+        fallback_ports.each do |one_port|
+          SuSEFirewall.AddService(one_port, "TCP", one_zone)
+        end
+      end
 
       nil
     end
@@ -261,18 +264,11 @@ module Yast
       zones = SuSEFirewall.GetZonesOfInterfaces(interfaces)
 
       if SuSEFirewallServices.IsKnownService(service)
-        Builtins.y2milestone(
-          "Opening service %1 on interfaces %2 (zones %3)",
-          service,
-          interfaces,
-          zones
-        )
+        log.info "Opening service #{service} on interfaces #{interfaces} (zones #{zones})"
         SuSEFirewall.SetServicesForZones([service], zones, true)
-      end
-
-      if SuSEFirewallServices.IsKnownService(service) != true ||
-          ServiceEnabled(service, interfaces) != true
-        EnableFallbackPorts(fallback_ports, interfaces)
+      else
+        log.warn "Unknown service #{service}"
+        EnableFallbackPorts(fallback_ports, zones)
       end
 
       nil
@@ -454,16 +450,7 @@ module Yast
 
       # BNC #766300 - Automatically propose opening iscsi-target port
       # when installing with withiscsi=1
-      if Linuxrc.useiscsi
-        Builtins.y2milestone(
-          "iSCSI has been used during installation, opening %1 service",
-          @iscsi_target_service
-        )
-        OpenServiceOnNonDialUpInterfaces(
-          @iscsi_target_service,
-          @iscsi_target_fallback_ports
-        )
-      end
+      propose_iscsi if Linuxrc.useiscsi
 
       SetKnownInterfaces(SuSEFirewall.GetListOfKnownInterfaces)
 
@@ -768,6 +755,18 @@ module Yast
       { "output" => output, "warning" => warning }
     end
 
+    # Proposes firewall settings for iSCSI
+    def propose_iscsi
+      log.info "iSCSI has been used during installation, opening #{@iscsi_target_service} service"
+
+      OpenServiceOnNonDialUpInterfaces(@iscsi_target_service, @iscsi_target_fallback_ports)
+
+      # bsc#916376: ports need to be open already during boot
+      SuSEFirewall.full_init_on_boot(true)
+
+      nil
+    end
+
     publish :function => :OpenServiceOnNonDialUpInterfaces, :type => "void (string, list <string>)"
     publish :function => :SetChangedByUser, :type => "void (boolean)"
     publish :function => :GetChangedByUser, :type => "boolean ()"
@@ -776,6 +775,7 @@ module Yast
     publish :function => :Reset, :type => "void ()"
     publish :function => :Propose, :type => "void ()"
     publish :function => :ProposalSummary, :type => "map <string, string> ()"
+    publish :function => :propose_iscsi, :type => "void ()"
   end
 
   SuSEFirewallProposal = SuSEFirewallProposalClass.new
